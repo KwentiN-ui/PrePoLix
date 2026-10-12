@@ -127,11 +127,11 @@ impl Analysis {
         let arguments = analysis.command_arguments();
         let job = Job::start_with_arguments(&job_solver, &work_dir, name, &input, &arguments)
             .map_err(|e| {
-            format!(
-                "CalculiX ({}) not started: {e}. {hint}",
-                job_solver.executable.display()
-            )
-        })?;
+                format!(
+                    "CalculiX ({}) not started: {e}. {hint}",
+                    job_solver.executable.display()
+                )
+            })?;
         let mut output = vec![format!(
             "{} {} in {}",
             name,

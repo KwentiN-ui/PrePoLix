@@ -124,7 +124,8 @@ impl AnalysisDialog {
 
     fn form(&mut self, ui: &mut Ui, solver: &Solver) {
         let old_name = self.draft.name.clone();
-        ui.label("Name").on_hover_text("Name of the analysis and of its files.");
+        ui.label("Name")
+            .on_hover_text("Name of the analysis and of its files.");
         let name = ui.add_enabled(
             !self.running,
             egui::TextEdit::singleline(&mut self.draft.name).desired_width(f32::INFINITY),

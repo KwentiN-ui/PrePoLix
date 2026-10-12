@@ -2965,8 +2965,8 @@ impl Workbench {
     fn analysis_action(&mut self, index: usize, action: AnalysisAction) {
         match action {
             AnalysisAction::Edit => {
-                let running = self.ran(index)
-                    && self.analysis.as_ref().is_some_and(Analysis::is_running);
+                let running =
+                    self.ran(index) && self.analysis.as_ref().is_some_and(Analysis::is_running);
                 self.analysis_dialog = (self.setup_model()).and_then(|m| {
                     crate::analysis_dialog::AnalysisDialog::edit(&m.fe.analyses, index, running)
                 });
@@ -2979,14 +2979,13 @@ impl Workbench {
                     copy.name = model.fe.analyses.next_name();
                     let copy_index = model.fe.analyses.len();
                     model.fe.analyses.push(copy);
-                    self.tree.selected =
-                        Some((TreeView::FeModel, TreeItem::Analysis(copy_index)));
+                    self.tree.selected = Some((TreeView::FeModel, TreeItem::Analysis(copy_index)));
                 }
             }
             AnalysisAction::Run => self.start_analysis(Some(index), false),
             AnalysisAction::CheckModel => self.start_analysis(Some(index), true),
-            AnalysisAction::Monitor => match &mut self.analysis {
-                Some(analysis) if self.ran(index) => analysis.monitor = true,
+            AnalysisAction::Monitor => match (self.ran(index), &mut self.analysis) {
+                (true, Some(analysis)) => analysis.monitor = true,
                 _ => self.output.push(
                     "The analysis has not been started yet (Analysis > Run Analysis).".into(),
                 ),
@@ -3162,8 +3161,7 @@ impl Workbench {
                 .map_err(|e| e.to_string());
             let _ = sender.send(BoundWork::Bound(frd, bound));
         });
-        self.output
-            .push(format!("Binding the result of {name} …"));
+        self.output.push(format!("Binding the result of {name} …"));
         self.bound_work = Some((model.path.clone(), receiver));
     }
 
