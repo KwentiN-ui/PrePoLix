@@ -67,8 +67,8 @@ has no mesh yet opens on the #ui("Geometry") tab, opening a result file switches
 === Working with tree items
 
 - *Double-click* an item to open its dialog. Double-clicking a container (for example
-  #ui("Materials")) creates a new item in it. Double-clicking #ui("Analyses") creates an analysis,
-  double-clicking an analysis edits it (@analyses).
+  #ui("Materials")) creates a new item in it. Double-clicking the analysis edits it
+  (@analysis-properties).
 - *Right-click* an item for its context menu (see below).
 - *Del* deletes the selected item after asking "Delete the selected item?"; #key("Ctrl+Z") brings it back (@undo).
 - *Space* activates or deactivates the selected item while the mouse is over the tree.

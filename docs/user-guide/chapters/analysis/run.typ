@@ -2,24 +2,24 @@
 
 = Running CalculiX <analysis>
 
-== Analyses <analyses>
+== Running an analysis
 
-The analyses of a model are listed under #ui("Analyses") at the bottom of the #ui("FE Model")
-tree. An analysis is a job CalculiX runs on the model; its name is also the name of its files in
-the work directory (`<name>.inp`, `<name>.frd`, `<name>.dat`). A new model, and a project saved
-before analyses were part of it, has one analysis, #ui("Analysis-1"). The analyses are saved with
-the project, and creating, editing or deleting one can be undone.
+A project has exactly one analysis, shown under #ui("Analyses") at the bottom of the
+#ui("FE Model") tree and called #ui("Analysis-1") in a new model. Its name is also the name of its
+files in the work directory (`<name>.inp`, `<name>.frd`, `<name>.dat`). It uses the CalculiX
+settings under #menu("Tools", "Settings ...", "CalculiX") (@settings).
 
-Double-click #ui("Analyses"), or use #ui("Create ...") in its context menu or
-#menu("Analysis", "Create Analysis ..."), to create an analysis. Double-click an analysis, or
-use #ui("Edit ...") in its context menu, to edit or rename it.
+=== Analysis properties <analysis-properties>
 
-#screenshot("analysis-dialog.png", [Editing an analysis])
+Double-click the analysis, or use #ui("Edit ...") in its context menu, to edit it. The name and
+the arguments are saved with the project; changing them can be undone.
+
+#screenshot("analysis-dialog.png", [Editing the analysis])
 
 #fields(
-  [Name], [Name of the analysis and of its files: letters, digits, `-`, `_` and `.`, unique among
-    the analyses. A running analysis cannot be renamed. A bound result (@bind-result) stays with
-    the renamed analysis.],
+  [Name], [Name of the analysis and of its files: letters, digits, `-`, `_` and `.`. It cannot be
+    changed while the analysis runs. The bound result (@bind-result) and the last run keep their
+    files and stay with the renamed analysis.],
   [FEM solver], [Always CalculiX.],
   [Executable], [The CalculiX executable from the settings, shown only.],
   [Executable arguments], [Command line arguments CalculiX is started with. The default is the
@@ -30,18 +30,14 @@ use #ui("Edit ...") in its context menu, to edit or rename it.
 )
 
 The link #ui("CalculiX settings") in the dialog opens #menu("Tools", "Settings ...",
-"CalculiX") (@settings), where the executable, the work directory and the threads are set for all
-analyses, as in PrePoMax.
-
-#ui("Duplicate") in the context menu of an analysis creates a copy under the next free name, and
-#ui("Delete") (or the #key("Delete") key) removes it after a question. Deleting an analysis also
-removes the result bound to it. A running analysis cannot be deleted.
-
-== Running an analysis
+"CalculiX"), where the executable, the work directory and the threads are set for all projects.
+#ui("Duplicate") and #ui("Delete") in the context menu are disabled: unlike PrePoMax, which runs
+its analyses in a temporary folder, PrePoLix binds the results to the project, so a project has
+one analysis.
 
 #fields(
-  [Run Analysis (#key("F5"))], [Writes `<name>.inp` to the work directory and starts CalculiX.
-    Old result files of the analysis in that directory are deleted first.],
+  [Run Analysis (#key("F5"))], [Writes `<name>.inp` to the work directory and starts
+    CalculiX. Old result files of the analysis in that directory are deleted first.],
   [Check Model], [Lets CalculiX only read and check the model (`*NO ANALYSIS`), without solving
     it.],
   [Kill Analysis], [Stops a running analysis.],
@@ -50,10 +46,7 @@ removes the result bound to it. A running analysis cannot be deleted.
     (@bind-result).],
 )
 
-These commands are in the context menu of each analysis and in the #ui("Analysis") menu. The
-menu runs the analysis selected in the tree, otherwise the one run last, otherwise the first; its
-#ui("Run Analysis") entry names it. One analysis runs at a time. The status icon of an analysis
-shows its last run or its bound result.
+These commands are in the #ui("Analysis") menu and in the context menu of the analysis.
 Before CalculiX starts, PrePoLix refuses to run a model without mesh, without step or with all
 steps deactivated, and it stops if the input file cannot be written (for example because a region
 is empty).
@@ -90,7 +83,7 @@ run replaces the bound result as soon as you open its results.
 
 When a project with a bound result is opened, PrePoLix writes the files to
 `Bound_Results/<project name>` in the work directory and opens the result on the #ui("Results")
-tab. The analysis the result belongs to then shows the status of the bound run, its tooltip says that a result is
+tab. The analysis then shows the status of the bound run, its tooltip says that a result is
 bound, and #ui("Results") in its context menu opens the bound result again.
 
 What you defined on the bound result is saved with it and comes back as you left it: derived

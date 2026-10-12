@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use plx_job::{Job, JobStatus};
-use plx_model::{AnalysisJob, EquationSolver};
+use plx_model::EquationSolver;
 
 use crate::model::Model;
 use crate::settings::Solver;
@@ -86,7 +86,6 @@ impl Analysis {
     pub fn start(
         solver: &Solver,
         model: &Model,
-        analysis: &AnalysisJob,
         default_solver: EquationSolver,
         check_model: bool,
     ) -> Result<Self, String> {
@@ -102,6 +101,7 @@ impl Analysis {
         let mut fe = model.fe.clone();
         fe.resolve_default_solver(default_solver);
         let work_dir = solver.work_dir();
+        let analysis = &model.fe.analysis;
         let name = analysis.name.as_str();
         stage_global_results(&mut fe, &work_dir, name)?;
         let write = if check_model {

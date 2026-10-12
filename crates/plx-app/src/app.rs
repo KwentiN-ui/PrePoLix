@@ -129,7 +129,7 @@ struct Workbench {
     /// `None` until it is computed, so a dialog's highlight is cleared once it closes.
     highlighted: Option<TreeSelection>,
     analysis: Option<Analysis>,
-    /// Open dialog creating or editing an analysis.
+    /// Open dialog editing the analysis.
     analysis_dialog: Option<crate::analysis_dialog::AnalysisDialog>,
     /// Results being bound to or restored from the project file of the model at this path.
     bound_work: Option<(PathBuf, std::sync::mpsc::Receiver<BoundWork>)>,
@@ -1553,7 +1553,26 @@ impl Workbench {
             .and_then(|m| m.geometry.as_ref())
             .map(|g| g.mesh_items.iter().map(|i| i.name.clone()).collect())
             .unwrap_or_default();
-        let jobs = self.job_states();
+        let bound = (self.model.as_ref()).and_then(|m| m.bound_results.as_ref());
+        let job = match (&self.analysis, bound) {
+            (Some(a), _) => Some(tree::JobState {
+                status: a.status(),
+                results: a.results().is_some(),
+                bound: bound.is_some(),
+                ran: true,
+            }),
+            (None, Some(bound)) => Some(tree::JobState {
+                status: if bound.with_errors {
+                    plx_job::JobStatus::FailedWithResults
+                } else {
+                    plx_job::JobStatus::Completed
+                },
+                results: true,
+                bound: true,
+                ran: false,
+            }),
+            (None, None) => None,
+        };
         let shown = match view {
             TreeView::Results => self.results.get_mut(self.current_result),
             TreeView::Geometry => self.geometry.as_mut(),
@@ -1564,7 +1583,7 @@ impl Workbench {
             view,
             shown,
             &mesh_items,
-            &jobs,
+            job,
             &self.solver_findings,
             &mut self.tree,
         );
@@ -1671,8 +1690,8 @@ impl Workbench {
             // The selection stays, but master and slave colours change places.
             self.highlighted = None;
         }
-        if let Some((index, action)) = response.analysis {
-            self.analysis_action(index, action);
+        if let Some(action) = response.analysis {
+            self.analysis_action(action);
         }
         if response.material_library {
             self.open_material_library();
@@ -2272,14 +2291,6 @@ impl Workbench {
     }
 
     fn create(&mut self, kind: NewItem) {
-        if kind == NewItem::Analysis {
-            if let Some(model) = self.setup_model() {
-                let dialog = crate::analysis_dialog::AnalysisDialog::create(&model.fe.analyses);
-                self.analysis_dialog = Some(dialog);
-                self.set_tree_view(TreeView::FeModel);
-            }
-            return;
-        }
         if kind == NewItem::ResultHotSpot {
             if let Some(model) = self.results.get(self.current_result) {
                 self.hot_spot_dialog = Some(HotSpotDialog::create(&model.hot_spots.definitions));
@@ -2799,39 +2810,21 @@ impl Workbench {
 
     fn analysis_menu(&mut self, ui: &mut egui::Ui) {
         let running = self.analysis.as_ref().is_some_and(Analysis::is_running);
-        let current = self.current_analysis();
-        let can_start = current.is_some() && !running;
+        let can_start = self.setup_model().is_some() && !running;
         if ui
             .add_enabled(
-                self.setup_model().is_some(),
-                egui::Button::new("Create Analysis …"),
+                can_start,
+                egui::Button::new("Run Analysis").shortcut_text("F5"),
             )
             .clicked()
         {
-            self.create(NewItem::Analysis);
-        }
-        // With several analyses the one selected in the tree runs.
-        let name = (current.zip(self.setup_model()))
-            .and_then(|(i, m)| m.fe.analyses.get(i))
-            .map(|a| a.name.clone());
-        let hint = "Runs the analysis selected in the tree, else the one run last.";
-        let run_text = match &name {
-            Some(name) => format!("Run Analysis: {name}"),
-            None => "Run Analysis".into(),
-        };
-        if ui
-            .add_enabled(can_start, egui::Button::new(run_text).shortcut_text("F5"))
-            .on_hover_text(hint)
-            .clicked()
-        {
-            self.start_analysis(current, false);
+            self.start_analysis(false);
         }
         if ui
             .add_enabled(can_start, egui::Button::new("Check Model"))
-            .on_hover_text(hint)
             .clicked()
         {
-            self.start_analysis(current, true);
+            self.start_analysis(true);
         }
         if ui
             .add_enabled(running, egui::Button::new("Kill Analysis"))
@@ -2904,99 +2897,26 @@ impl Workbench {
         self.campbell = Some(window);
     }
 
-    /// The analysis jobs the tree shows: the one that ran and the one with a bound result.
-    fn job_states(&self) -> Vec<tree::JobState> {
-        let Some(model) = self.model.as_ref() else {
-            return Vec::new();
-        };
-        let analyses = &model.fe.analyses;
-        let bound = model.bound_results.as_ref();
-        let bound_to = bound.and_then(|b| analyses.position(&b.analysis));
-        let mut jobs = Vec::new();
-        let ran = (self.analysis.as_ref()).and_then(|a| Some((analyses.position(a.name())?, a)));
-        if let Some((index, analysis)) = ran {
-            jobs.push(tree::JobState {
-                analysis: index,
-                status: analysis.status(),
-                results: analysis.results().is_some(),
-                bound: bound_to == Some(index),
-                ran: true,
-            });
-        }
-        if let (Some(bound), Some(index)) = (bound, bound_to)
-            && ran.is_none_or(|(ran, _)| ran != index)
-        {
-            jobs.push(tree::JobState {
-                analysis: index,
-                status: if bound.with_errors {
-                    plx_job::JobStatus::FailedWithResults
-                } else {
-                    plx_job::JobStatus::Completed
-                },
-                results: true,
-                bound: true,
-                ran: false,
-            });
-        }
-        jobs
-    }
-
-    /// The analysis the Analysis menu and F5 run: the one selected in the tree, else the
-    /// one run last, else the first.
-    fn current_analysis(&self) -> Option<usize> {
-        let analyses = &self.setup_model()?.fe.analyses;
-        if let Some((TreeView::FeModel, TreeItem::Analysis(index))) = &self.tree.selected
-            && *index < analyses.len()
-        {
-            return Some(*index);
-        }
-        (self.analysis.as_ref())
-            .and_then(|a| analyses.position(a.name()))
-            .or_else(|| (!analyses.is_empty()).then_some(0))
-    }
-
-    /// Whether the last run is of the analysis `index`.
-    fn ran(&self, index: usize) -> bool {
-        let name = (self.setup_model()).and_then(|m| m.fe.analyses.get(index));
-        (self.analysis.as_ref()).is_some_and(|a| name.is_some_and(|n| n.name == a.name()))
-    }
-
-    /// An entry of an analysis' context menu in the tree.
-    fn analysis_action(&mut self, index: usize, action: AnalysisAction) {
+    /// An entry of the analysis' context menu in the tree.
+    fn analysis_action(&mut self, action: AnalysisAction) {
         match action {
             AnalysisAction::Edit => {
-                let running =
-                    self.ran(index) && self.analysis.as_ref().is_some_and(Analysis::is_running);
-                self.analysis_dialog = (self.setup_model()).and_then(|m| {
-                    crate::analysis_dialog::AnalysisDialog::edit(&m.fe.analyses, index, running)
-                });
+                let running = self.analysis.as_ref().is_some_and(Analysis::is_running);
+                self.analysis_dialog = (self.setup_model())
+                    .map(|m| crate::analysis_dialog::AnalysisDialog::edit(&m.fe.analysis, running));
             }
-            AnalysisAction::Duplicate => {
-                if let Some(model) = &mut self.model
-                    && let Some(job) = model.fe.analyses.get(index)
-                {
-                    let mut copy = job.clone();
-                    copy.name = model.fe.analyses.next_name();
-                    let copy_index = model.fe.analyses.len();
-                    model.fe.analyses.push(copy);
-                    self.tree.selected = Some((TreeView::FeModel, TreeItem::Analysis(copy_index)));
-                }
-            }
-            AnalysisAction::Run => self.start_analysis(Some(index), false),
-            AnalysisAction::CheckModel => self.start_analysis(Some(index), true),
-            AnalysisAction::Monitor => match (self.ran(index), &mut self.analysis) {
-                (true, Some(analysis)) => analysis.monitor = true,
-                _ => self.output.push(
+            AnalysisAction::Run => self.start_analysis(false),
+            AnalysisAction::CheckModel => self.start_analysis(true),
+            AnalysisAction::Monitor => match &mut self.analysis {
+                Some(analysis) => analysis.monitor = true,
+                None => self.output.push(
                     "The analysis has not been started yet (Analysis > Run Analysis).".into(),
                 ),
             },
-            AnalysisAction::Results => {
-                let ran = self.ran(index);
-                match self.analysis.as_ref().and_then(Analysis::results) {
-                    Some(_) if ran => self.open_analysis_results(),
-                    _ => self.open_bound_results(),
-                }
-            }
+            AnalysisAction::Results => match self.analysis.as_ref().and_then(Analysis::results) {
+                Some(_) => self.open_analysis_results(),
+                None => self.open_bound_results(),
+            },
             AnalysisAction::RemoveBoundResult => {
                 if let Some(model) = &mut self.model
                     && model.bound_results.take().is_some()
@@ -3009,23 +2929,21 @@ impl Workbench {
                 }
             }
             AnalysisAction::Kill => {
-                if self.ran(index)
-                    && let Some(analysis) = &mut self.analysis
-                {
+                if let Some(analysis) = &mut self.analysis {
                     analysis.kill();
                 }
             }
         }
     }
 
-    /// The dialog creating or editing an analysis.
+    /// The dialog editing the analysis.
     fn analysis_dialog_window(&mut self, ctx: &egui::Context) {
         use crate::analysis_dialog::AnalysisDialogResult;
         let (Some(dialog), Some(model)) = (&mut self.analysis_dialog, &mut self.model) else {
             self.analysis_dialog = None;
             return;
         };
-        match dialog.show(ctx, &model.fe.analyses, &self.settings.solver) {
+        match dialog.show(ctx, &self.settings.solver) {
             AnalysisDialogResult::Open => {}
             AnalysisDialogResult::Cancel => self.analysis_dialog = None,
             AnalysisDialogResult::Settings => {
@@ -3033,60 +2951,20 @@ impl Workbench {
                 self.settings_window = Some(window);
             }
             AnalysisDialogResult::Ok => {
-                let draft = dialog.draft.clone();
-                match dialog.index {
-                    None => {
-                        let index = model.fe.analyses.len();
-                        model.fe.analyses.push(draft);
-                        self.tree.selected = Some((TreeView::FeModel, TreeItem::Analysis(index)));
+                let old = std::mem::replace(&mut model.fe.analysis, dialog.draft.clone());
+                let new = &model.fe.analysis.name;
+                // The last run and the bound result stay with the renamed analysis.
+                if old.name != *new {
+                    if let Some(bound) = &mut model.bound_results {
+                        bound.analysis = new.clone();
                     }
-                    Some(index) => {
-                        let Some(job) = model.fe.analyses.get_mut(index) else {
-                            self.analysis_dialog = None;
-                            return;
-                        };
-                        let old = std::mem::replace(job, draft);
-                        let new = &model.fe.analyses[index].name;
-                        // The run and the bound result stay with the renamed analysis.
-                        if old.name != *new {
-                            if let Some(bound) = &mut model.bound_results
-                                && bound.analysis == old.name
-                            {
-                                bound.analysis = new.clone();
-                            }
-                            if let Some(analysis) = &mut self.analysis
-                                && analysis.name() == old.name
-                            {
-                                analysis.rename(new.clone());
-                            }
-                        }
+                    if let Some(analysis) = &mut self.analysis {
+                        analysis.rename(new.clone());
                     }
                 }
                 self.analysis_dialog = None;
             }
         }
-    }
-
-    /// Deletes the analysis `index` with its bound result; a running one stays.
-    fn delete_analysis(&mut self, index: usize) {
-        let running = self.ran(index) && self.analysis.as_ref().is_some_and(Analysis::is_running);
-        let Some(model) = self.model.as_mut() else {
-            return;
-        };
-        if running || index >= model.fe.analyses.len() {
-            return;
-        }
-        let job = model.fe.analyses.remove(index);
-        if model
-            .bound_results
-            .as_ref()
-            .is_some_and(|b| b.analysis == job.name)
-        {
-            model.bound_results = None;
-            model.bound_results_file = None;
-        }
-        self.tree.selected = None;
-        self.analysis_dialog = None;
     }
 
     /// Opens the results of the last run and binds them to the project, once per run.
@@ -3148,13 +3026,13 @@ impl Workbench {
         analysis.bound = true;
         let with_errors = analysis.status() == plx_job::JobStatus::FailedWithResults;
         let name = analysis.name().to_owned();
+        let job_name = name.clone();
         let Some(model) = &self.model else {
             return;
         };
         // Compressing large results takes seconds: done beside the GUI.
         let (sender, receiver) = std::sync::mpsc::channel();
         let files = ["inp", "frd", "dat"].map(|e| frd.with_extension(e));
-        let job_name = name.clone();
         std::thread::spawn(move || {
             let bound = plx_io::project::bind_results(&job_name, &files, with_errors)
                 .map(Box::new)
@@ -3246,21 +3124,13 @@ impl Workbench {
         }
     }
 
-    /// Runs the analysis `index` of the model, or only checks the model.
-    fn start_analysis(&mut self, index: Option<usize>, check_model: bool) {
+    fn start_analysis(&mut self, check_model: bool) {
         if self.analysis.as_ref().is_some_and(Analysis::is_running) {
             return;
         }
-        let Some(model) = self.setup_model() else {
+        if self.setup_model().is_none() {
             return;
-        };
-        let Some(job) = index.and_then(|i| model.fe.analyses.get(i)).cloned() else {
-            self.output.push(
-                "The model has no analysis: double-click Analyses in the tree to create one."
-                    .into(),
-            );
-            return;
-        };
+        }
         let default_solver = self.settings.solver.default_solver();
         let Some(model) = self.setup_model() else {
             return;
@@ -3271,13 +3141,7 @@ impl Workbench {
             return;
         }
         let findings = model.findings();
-        match Analysis::start(
-            &self.settings.solver,
-            model,
-            &job,
-            default_solver,
-            check_model,
-        ) {
+        match Analysis::start(&self.settings.solver, model, default_solver, check_model) {
             Ok(mut analysis) => {
                 // Problems the checks found go into the monitor first, so that an abort is
                 // explained even before CalculiX says anything.
@@ -3291,13 +3155,12 @@ impl Workbench {
                     ));
                 }
                 self.output.push(format!(
-                    "{} {} started: {}",
+                    "{} started: {}",
                     if check_model {
-                        "Model check of"
+                        "Model check"
                     } else {
                         "Analysis"
                     },
-                    job.name,
                     self.settings.solver.work_dir().display()
                 ));
                 self.solver_findings.clear();
@@ -3330,7 +3193,7 @@ impl Workbench {
     /// Polls the running analysis and shows its monitor.
     fn run_analysis(&mut self, ctx: &egui::Context) {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F5)) {
-            self.start_analysis(self.current_analysis(), false);
+            self.start_analysis(false);
         }
         let Some(analysis) = &mut self.analysis else {
             return;
@@ -3446,9 +3309,6 @@ impl Workbench {
             return;
         };
         let heading = format!("PrePoLix: {}", model.file_name());
-        let name = (self.current_analysis())
-            .and_then(|i| model.fe.analyses.get(i))
-            .map_or_else(|| plx_model::FIRST_ANALYSIS.to_owned(), |a| a.name.clone());
         let mut fe = model.fe.clone();
         fe.resolve_default_solver(default_solver);
         // Checked before asking for the file; the global results are staged once it is known.
@@ -3459,7 +3319,7 @@ impl Workbench {
         let picked = rfd::FileDialog::new()
             .set_title("Export CalculiX Input File")
             .add_filter("Input file (*.inp)", &["inp"])
-            .set_file_name(format!("{name}.inp"))
+            .set_file_name(format!("{}.inp", model.fe.analysis.name))
             .save_file();
         if let Some(path) = picked {
             // A submodel's global results go next to the input file, which names them.
@@ -4261,27 +4121,7 @@ impl Workbench {
                 _ => None,
             })
             .collect();
-        let analysis = (items.iter())
-            .find_map(|item| match item {
-                TreeItem::Analysis(index) => self.model.as_ref()?.fe.analyses.get(*index),
-                _ => None,
-            })
-            .map(|a| {
-                let bound = (self.model.as_ref())
-                    .and_then(|m| m.bound_results.as_ref())
-                    .is_some_and(|b| b.analysis == a.name);
-                format!(
-                    "Delete the analysis {}?{}",
-                    a.name,
-                    if bound {
-                        "\nThe result bound to it is removed from the project."
-                    } else {
-                        ""
-                    }
-                )
-            });
         let question = match parts.as_slice() {
-            [] if analysis.is_some() => analysis.unwrap_or_default(),
             [] => "Delete the selected item?".into(),
             [name] => format!("Delete the selected part?\n{name}"),
             names => format!("Delete the selected parts?\n{}", names.join(", ")),
@@ -4348,9 +4188,7 @@ impl Workbench {
     }
 
     fn delete_item(&mut self, view: TreeView, item: TreeItem) {
-        if let TreeItem::Analysis(index) = item {
-            self.delete_analysis(index);
-        } else if let TreeItem::Part(index) = item {
+        if let TreeItem::Part(index) = item {
             self.delete_parts(view, &[index]);
         } else if let TreeItem::ResultFieldOutput(field) = item {
             self.delete_field_output(field);

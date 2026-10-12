@@ -240,13 +240,10 @@ mod tests {
             }],
             sections: Vec::new(),
             steps: vec![Step::new_static("Step-1"), Step::new_coupled("Step-2")],
-            analyses: plx_model::Analyses(vec![
-                plx_model::AnalysisJob::new("Analysis-1"),
-                plx_model::AnalysisJob {
-                    name: "Bracket".into(),
-                    arguments: Some("-i Bracket".into()),
-                },
-            ]),
+            analysis: plx_model::AnalysisJob {
+                name: "Bracket".into(),
+                arguments: Some("-i Bracket".into()),
+            },
             user_keywords: vec![UserKeyword {
                 position: vec![14, 0],
                 text: "*Amplitude, Name=A\n0, 0, 1, 1".into(),
@@ -412,25 +409,16 @@ mod tests {
     }
 
     #[test]
-    fn analyses_are_saved_and_older_projects_get_the_first() {
+    fn projects_without_an_analysis_get_the_first() {
         let mut model = FeModel::default();
-        let mut second = plx_model::AnalysisJob::new("Bracket");
-        second.set_arguments("-i Bracket");
-        model.analyses.push(second);
+        model.analysis.name = "Bracket".into();
         let text = ron::to_string(&model).unwrap();
-        let read: FeModel = ron::from_str(&text).unwrap();
-        assert_eq!(read.analyses, model.analyses);
-        // Projects saved before analyses were part of the model have Analysis-1.
-        let start = text.find("analyses:").unwrap();
-        let end = start + text[start..].find(']').unwrap() + 1;
-        let older = format!("{}{}", &text[..start], &text[end..]).replace(",)", ")");
+        assert_eq!(ron::from_str::<FeModel>(&text).unwrap(), model);
+        // Projects saved before the analysis was part of the model have Analysis-1.
+        let older = text.replace(",analysis:(name:\"Bracket\")", "");
+        assert_ne!(older, text);
         let read: FeModel = ron::from_str(&older).unwrap();
-        assert_eq!(read.analyses.len(), 1);
-        assert_eq!(read.analyses[0].name, plx_model::FIRST_ANALYSIS);
-        // All analyses deleted stays so.
-        model.analyses.clear();
-        let read: FeModel = ron::from_str(&ron::to_string(&model).unwrap()).unwrap();
-        assert!(read.analyses.is_empty());
+        assert_eq!(read.analysis.name, plx_model::FIRST_ANALYSIS);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! PrePoMax's analysis dialog: creates an analysis or edits one, its name and the arguments
+//! PrePoMax's analysis dialog: edits the analysis of the project, its name and the arguments
 //! CalculiX is started with. The executable and the work directory are shown as PrePoMax
 //! shows them; they are settings of the program.
 
@@ -9,8 +9,6 @@ use crate::settings::Solver;
 
 pub struct AnalysisDialog {
     pub draft: AnalysisJob,
-    /// The analysis being edited, by index; `None` creates a new one.
-    pub index: Option<usize>,
     /// The arguments as typed.
     arguments: String,
     /// The analysis is running: its name names the files CalculiX writes now.
@@ -26,52 +24,19 @@ pub enum AnalysisDialogResult {
 }
 
 impl AnalysisDialog {
-    /// A new analysis with the next free default name.
-    pub fn create(analyses: &plx_model::Analyses) -> Self {
-        Self::with(AnalysisJob::new(analyses.next_name()), None, false)
-    }
-
-    pub fn edit(analyses: &plx_model::Analyses, index: usize, running: bool) -> Option<Self> {
-        let job = analyses.get(index)?.clone();
-        Some(Self::with(job, Some(index), running))
-    }
-
-    fn with(draft: AnalysisJob, index: Option<usize>, running: bool) -> Self {
+    pub fn edit(analysis: &AnalysisJob, running: bool) -> Self {
         Self {
-            arguments: draft.arguments_text().to_owned(),
-            draft,
-            index,
+            arguments: analysis.arguments_text().to_owned(),
+            draft: analysis.clone(),
             running,
         }
     }
 
-    fn title(&self) -> String {
-        let action = if self.index.is_some() {
-            "Edit"
-        } else {
-            "Create"
-        };
-        format!("{action} Analysis: {}", self.draft.name)
-    }
-
-    /// Why the draft cannot be taken; `analyses` are those of the model.
-    pub fn error(&self, analyses: &plx_model::Analyses) -> Option<String> {
-        let others = (analyses.iter().enumerate())
-            .filter(|(i, _)| Some(*i) != self.index)
-            .map(|(_, a)| a.name.as_str());
-        analysis_name_error(&self.draft.name, others)
-    }
-
-    pub fn show(
-        &mut self,
-        ctx: &egui::Context,
-        analyses: &plx_model::Analyses,
-        solver: &Solver,
-    ) -> AnalysisDialogResult {
+    pub fn show(&mut self, ctx: &egui::Context, solver: &Solver) -> AnalysisDialogResult {
         let mut result = AnalysisDialogResult::Open;
         let mut open = true;
-        let error = self.error(analyses);
-        egui::Window::new(self.title())
+        let error = analysis_name_error(&self.draft.name);
+        egui::Window::new(format!("Edit Analysis: {}", self.draft.name))
             .id(egui::Id::new("analysis dialog"))
             .open(&mut open)
             .collapsible(false)

@@ -66,8 +66,7 @@ pub enum TreeItem {
     HistoryOutput(usize, usize),
     /// A defined field of a step, by step and index.
     DefinedField(usize, usize),
-    /// An analysis of the model, by index.
-    Analysis(usize),
+    Analysis,
     /// Features of the FE model or of the shown results, by index.
     ReferencePoint(usize),
     CoordinateSystem(usize),
@@ -209,9 +208,8 @@ pub struct TreeResponse {
     pub swap_master_slave: Option<TreeItem>,
     /// Hide (`false`) or show the symbols of constraints, boundary conditions or loads.
     pub symbol_visibility: Vec<(TreeItem, bool)>,
-    /// An entry of an analysis' context menu, or its edit dialog by double click; by the
-    /// index of the analysis.
-    pub analysis: Option<(usize, AnalysisAction)>,
+    /// An entry of the analysis' context menu, or the monitor by double click.
+    pub analysis: Option<AnalysisAction>,
     /// Open the material library.
     pub material_library: bool,
     /// Open the default meshing parameters of the geometry.
@@ -237,8 +235,6 @@ pub struct TreeResponse {
 pub enum AnalysisAction {
     /// Edit the analysis: its name and the arguments of CalculiX.
     Edit,
-    /// Create a copy of the analysis under the next free name.
-    Duplicate,
     Run,
     CheckModel,
     Monitor,
@@ -248,11 +244,9 @@ pub enum AnalysisAction {
     RemoveBoundResult,
 }
 
-/// What the tree shows of an analysis job.
+/// What the tree shows of the analysis job.
 #[derive(Clone, Copy, Debug)]
 pub struct JobState {
-    /// The analysis, by index.
-    pub analysis: usize,
     pub status: JobStatus,
     /// A results file is there to be opened.
     pub results: bool,
@@ -414,8 +408,7 @@ fn tree_items(item: ModelItem) -> (TreeItem, Vec<TreeItem>) {
             containers.remove(0);
             (TreeItem::StepGroup(s, "BCs"), containers)
         }
-        // Shown on the analysis that ran, see `fe_model`.
-        ModelItem::Analysis => (TreeItem::Analysis(0), vec![TreeItem::Group("Analyses")]),
+        ModelItem::Analysis => (TreeItem::Analysis, vec![TreeItem::Group("Analyses")]),
         ModelItem::InitialCondition(i) => (
             TreeItem::InitialCondition(i),
             vec![TreeItem::Group("Initial Conditions"), TreeItem::Model],
@@ -434,7 +427,6 @@ fn creates(item: &TreeItem) -> Option<NewItem> {
         TreeItem::Group("Contact Pairs") => Some(NewItem::ContactPair),
         TreeItem::Group("Amplitudes") => Some(NewItem::Amplitude),
         TreeItem::Group("Initial Conditions") => Some(NewItem::InitialCondition),
-        TreeItem::Group("Analyses") => Some(NewItem::Analysis),
         TreeItem::StepGroup(step, "BCs") => Some(NewItem::BoundaryCondition(step)),
         TreeItem::StepGroup(step, "Loads") => Some(NewItem::Load(step)),
         TreeItem::StepGroup(step, "Field Outputs") => Some(NewItem::FieldOutput(step)),
@@ -509,7 +501,6 @@ fn deletable(view: TreeView, item: &TreeItem) -> bool {
                 | TreeItem::MeshItem(_)
         )
         || (view == TreeView::FeModel && set_kind(item).is_some())
-        || (view == TreeView::FeModel && matches!(item, TreeItem::Analysis(_)))
 }
 
 fn is_fe_item(item: &TreeItem) -> bool {
@@ -730,9 +721,8 @@ struct Tree<'a> {
     view: TreeView,
     state: &'a mut TreeState,
     response: TreeResponse,
-    /// The analysis jobs that ran or have a bound result: the status is the icon of the
-    /// analysis.
-    jobs: Vec<JobState>,
+    /// The analysis job: its status is the icon of the analysis.
+    job: Option<JobState>,
     /// Rows of the open branches, innermost last, for the connector lines.
     levels: Vec<Vec<Row>>,
     /// Inside an item being expanded or collapsed: the state all branches take.
@@ -844,11 +834,9 @@ impl Tree<'_> {
                 }
             });
         }
-        if let TreeItem::Analysis(index) = item
-            && response.double_clicked()
-        {
+        if response.double_clicked() && item == TreeItem::Analysis {
             // As in PrePoMax a double click edits the analysis.
-            self.response.analysis = Some((index, AnalysisAction::Edit));
+            self.response.analysis = Some(AnalysisAction::Edit);
         } else if response.double_clicked() {
             match creates {
                 // PrePoMax creates an item when its container is double-clicked.
@@ -868,13 +856,13 @@ impl Tree<'_> {
                     | TreeItem::HotSpot(_)
                     | TreeItem::MeshItem(_)
             );
-        if let TreeItem::Analysis(index) = item {
-            if self.job(index).is_some_and(|j| j.bound) {
+        if item == TreeItem::Analysis {
+            if self.job.is_some_and(|j| j.bound) {
                 response = response.on_hover_text(
                     "A result is bound to this analysis: it is saved with the project.",
                 );
             }
-            response.context_menu(|ui| self.analysis_menu(ui, index));
+            response.context_menu(|ui| self.analysis_menu(ui));
         }
         if creates.is_some() || editable {
             response.context_menu(|ui| {
@@ -988,36 +976,27 @@ impl Tree<'_> {
         response
     }
 
-    /// The job of the analysis `index`, if it ran or has a bound result.
-    fn job(&self, index: usize) -> Option<JobState> {
-        self.jobs.iter().copied().find(|j| j.analysis == index)
-    }
-
-    /// Whether any analysis is running; CalculiX runs one analysis at a time.
-    fn any_running(&self) -> bool {
-        self.jobs.iter().any(|j| j.status == JobStatus::Running)
-    }
-
-    /// PrePoMax's context menu of an analysis.
-    fn analysis_menu(&mut self, ui: &mut Ui, index: usize) {
+    /// PrePoMax's context menu of an analysis. Duplicating and deleting are shown but
+    /// disabled: a project has exactly one analysis, its results are bound to the project.
+    fn analysis_menu(&mut self, ui: &mut Ui) {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-        let job = self.job(index);
-        let running = job.is_some_and(|j| j.status == JobStatus::Running);
-        let any_running = self.any_running();
-        let results = job.is_some_and(|j| j.results) && !running;
+        let running = self.job.is_some_and(|j| j.status == JobStatus::Running);
+        let results = self.job.is_some_and(|j| j.results) && !running;
+        let single = "A project has one analysis.";
         let mut action = |ui: &mut Ui, enabled: bool, text: &str, action: AnalysisAction| {
             if ui.add_enabled(enabled, egui::Button::new(text)).clicked() {
-                self.response.analysis = Some((index, action));
+                self.response.analysis = Some(action);
             }
         };
         action(ui, true, "Edit …", AnalysisAction::Edit);
-        action(ui, true, "Duplicate", AnalysisAction::Duplicate);
+        ui.add_enabled(false, egui::Button::new("Duplicate"))
+            .on_disabled_hover_text(single);
         ui.separator();
-        action(ui, !any_running, "Run", AnalysisAction::Run);
-        action(ui, !any_running, "Check Model", AnalysisAction::CheckModel);
+        action(ui, !running, "Run", AnalysisAction::Run);
+        action(ui, !running, "Check Model", AnalysisAction::CheckModel);
         action(
             ui,
-            job.is_some_and(|j| j.ran),
+            self.job.is_some_and(|j| j.ran),
             "Monitor",
             AnalysisAction::Monitor,
         );
@@ -1025,7 +1004,7 @@ impl Tree<'_> {
         action(ui, running, "Kill", AnalysisAction::Kill);
         ui.separator();
         // Results opened from the analysis are bound to the project and saved with it.
-        let bound = job.is_some_and(|j| j.bound);
+        let bound = self.job.is_some_and(|j| j.bound);
         action(
             ui,
             bound,
@@ -1037,12 +1016,8 @@ impl Tree<'_> {
         ui.add_enabled(false, egui::Button::new("Expand All"));
         ui.add_enabled(false, egui::Button::new("Collapse All"));
         ui.separator();
-        let delete = ui
-            .add_enabled(!running, egui::Button::new("Delete"))
-            .on_disabled_hover_text("The analysis is running.");
-        if delete.clicked() {
-            self.response.delete = Some(TreeItem::Analysis(index));
-        }
+        ui.add_enabled(false, egui::Button::new("Delete"))
+            .on_disabled_hover_text(single);
     }
 
     /// PrePoMax's image of a node; containers without an own image get the dotted line.
@@ -1097,7 +1072,7 @@ impl Tree<'_> {
             TreeItem::StepGroup(_, "Defined Fields") => TreeIcon::DefinedField,
             TreeItem::Group("Analyses") => TreeIcon::Analysis,
             TreeItem::Group(HOT_SPOTS) => TreeIcon::HotSpot,
-            TreeItem::Analysis(index) => match self.job(*index).map(|j| j.status) {
+            TreeItem::Analysis => match self.job.map(|j| j.status) {
                 Some(JobStatus::Running) => TreeIcon::Running,
                 Some(JobStatus::Completed) => TreeIcon::Finished,
                 Some(JobStatus::FailedWithResults) => TreeIcon::Warning,
@@ -1406,7 +1381,7 @@ pub fn show(
     view: TreeView,
     model: Option<&mut Model>,
     mesh_items: &[String],
-    jobs: &[JobState],
+    job: Option<JobState>,
     solver_findings: &[Finding],
     state: &mut TreeState,
 ) -> TreeResponse {
@@ -1414,7 +1389,7 @@ pub fn show(
         view,
         state,
         response: TreeResponse::default(),
-        jobs: jobs.to_vec(),
+        job,
         levels: vec![Vec::new()],
         forced_open: None,
         findings: HashMap::new(),
@@ -1491,13 +1466,7 @@ fn fe_model(tree: &mut Tree, ui: &mut Ui, model: Option<&mut Model>, solver: &[F
     let model = model.filter(|m| !m.is_results());
     if let Some(model) = &model {
         for finding in model.findings().into_iter().chain(solver.iter().cloned()) {
-            let (mut item, containers) = tree_items(finding.item);
-            // CalculiX's findings belong to the analysis that ran.
-            if finding.item == ModelItem::Analysis
-                && let Some(job) = tree.jobs.iter().find(|j| j.ran)
-            {
-                item = TreeItem::Analysis(job.analysis);
-            }
+            let (item, containers) = tree_items(finding.item);
             if finding.severity() == Severity::Error {
                 tree.holds_invalid.extend(containers);
             }
@@ -1657,10 +1626,15 @@ fn fe_model(tree: &mut Tree, ui: &mut Ui, model: Option<&mut Model>, solver: &[F
         });
     });
     if has_model {
-        let analyses = (fe.analyses.iter().enumerate())
-            .map(|(i, a)| (TreeItem::Analysis(i), a.name.as_str()))
-            .collect();
-        tree.container(ui, "Analyses", analyses);
+        tree.branch(
+            ui,
+            TreeItem::Group("Analyses"),
+            "Analyses (1)",
+            true,
+            |tree, ui| {
+                tree.leaf(ui, TreeItem::Analysis, &fe.analysis.name);
+            },
+        );
     } else {
         tree.leaf(ui, TreeItem::Group("Analyses"), "Analyses");
     }
