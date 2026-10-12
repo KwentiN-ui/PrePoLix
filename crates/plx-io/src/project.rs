@@ -240,6 +240,13 @@ mod tests {
             }],
             sections: Vec::new(),
             steps: vec![Step::new_static("Step-1"), Step::new_coupled("Step-2")],
+            analyses: plx_model::Analyses(vec![
+                plx_model::AnalysisJob::new("Analysis-1"),
+                plx_model::AnalysisJob {
+                    name: "Bracket".into(),
+                    arguments: Some("-i Bracket".into()),
+                },
+            ]),
             user_keywords: vec![UserKeyword {
                 position: vec![14, 0],
                 text: "*Amplitude, Name=A\n0, 0, 1, 1".into(),
@@ -536,7 +543,7 @@ mod tests {
         assert!(
             !std::fs::read_to_string(&path)
                 .unwrap()
-                .contains("Analysis-1")
+                .contains("with_errors")
         );
         assert_eq!(read_project(&path).unwrap().results, None);
 
