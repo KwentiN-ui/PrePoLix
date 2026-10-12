@@ -6,6 +6,7 @@
 //! file is written, so the user never has to define sets by hand.
 
 mod amplitude;
+mod analysis;
 mod checks;
 pub mod color_scale;
 mod constraint;
@@ -27,6 +28,7 @@ pub mod units;
 mod validity;
 
 pub use amplitude::{Amplitude, AmplitudeTime};
+pub use analysis::{Analyses, AnalysisJob, FIRST_ANALYSIS, analysis_name_error};
 pub use checks::{Finding, MeshCheck, Problem, Severity, diagnose_solver_output};
 pub use color_scale::{ColorScale, ColorSpectrum};
 pub use constraint::{
@@ -120,6 +122,10 @@ pub struct FeModel {
     /// Element types the user chose for parts instead of those the mesh came with.
     #[serde(default)]
     pub element_types: Vec<PartElementType>,
+    /// PrePoMax's analyses, the jobs CalculiX runs on the model; projects saved before they
+    /// were part of the model get `Analysis-1`.
+    #[serde(default)]
+    pub analyses: Analyses,
 }
 
 impl FeModel {

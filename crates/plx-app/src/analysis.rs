@@ -5,16 +5,17 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use plx_job::{Job, JobStatus};
-use plx_model::EquationSolver;
+use plx_model::{AnalysisJob, EquationSolver};
 
 use crate::model::Model;
 use crate::settings::Solver;
-use crate::tree::ANALYSIS_NAME;
 
 /// Lines of solver output kept for the monitor window.
 const MAX_OUTPUT_LINES: usize = 5000;
 
 pub struct Analysis {
+    /// Name of the analysis that ran; follows a rename, while the files keep the job name.
+    name: String,
     job: Job,
     output: Vec<String>,
     /// Text typed into the monitor's filter field; only output lines containing it are shown.
@@ -78,12 +79,14 @@ pub fn stage_global_results(
 }
 
 impl Analysis {
-    /// Writes `Analysis-1.inp` into the work directory and starts CalculiX on it; steps left
-    /// at the default solver use `default_solver`, see [`Solver::default_solver`]. With
-    /// `check_model` CalculiX only reads and checks the model (PrePoMax's "Check Model").
+    /// Writes `<analysis name>.inp` into the work directory and starts CalculiX on it with the
+    /// analysis' arguments; steps left at the default solver use `default_solver`, see
+    /// [`Solver::default_solver`]. With `check_model` CalculiX only reads and checks the
+    /// model (PrePoMax's "Check Model").
     pub fn start(
         solver: &Solver,
         model: &Model,
+        analysis: &AnalysisJob,
         default_solver: EquationSolver,
         check_model: bool,
     ) -> Result<Self, String> {
@@ -99,7 +102,8 @@ impl Analysis {
         let mut fe = model.fe.clone();
         fe.resolve_default_solver(default_solver);
         let work_dir = solver.work_dir();
-        stage_global_results(&mut fe, &work_dir, ANALYSIS_NAME)?;
+        let name = analysis.name.as_str();
+        stage_global_results(&mut fe, &work_dir, name)?;
         let write = if check_model {
             plx_io::inp::write_check_inp
         } else {
@@ -120,7 +124,9 @@ impl Analysis {
         if let Some(message) = crate::settings::missing_executable(&job_solver.executable) {
             return Err(format!("CalculiX not started: {message}. {hint}"));
         }
-        let job = Job::start(&job_solver, &work_dir, ANALYSIS_NAME, &input).map_err(|e| {
+        let arguments = analysis.command_arguments();
+        let job = Job::start_with_arguments(&job_solver, &work_dir, name, &input, &arguments)
+            .map_err(|e| {
             format!(
                 "CalculiX ({}) not started: {e}. {hint}",
                 job_solver.executable.display()
@@ -128,7 +134,7 @@ impl Analysis {
         })?;
         let mut output = vec![format!(
             "{} {} in {}",
-            ANALYSIS_NAME,
+            name,
             if check_model {
                 "model check started"
             } else {
@@ -136,8 +142,14 @@ impl Analysis {
             },
             work_dir.display()
         )];
+        output.push(format!(
+            "Command: {} {}",
+            job_solver.executable.display(),
+            arguments.join(" ")
+        ));
         output.extend(copied);
         Ok(Self {
+            name: name.to_owned(),
             output,
             filter: String::new(),
             job,
@@ -148,6 +160,16 @@ impl Analysis {
             bound: false,
             keywords,
         })
+    }
+
+    /// Name of the analysis that ran.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The analysis that ran was renamed; its files keep their names.
+    pub fn rename(&mut self, name: String) {
+        self.name = name;
     }
 
     /// Adds a line of prepolix's own to the monitor output.
@@ -212,7 +234,8 @@ impl Analysis {
         let mut event = MonitorEvent::None;
         let mut open = self.monitor;
         let status = self.job.poll();
-        egui::Window::new(format!("Monitor: {ANALYSIS_NAME}"))
+        egui::Window::new(format!("Monitor: {}", self.name))
+            .id(egui::Id::new("analysis monitor"))
             .open(&mut open)
             .collapsible(false)
             .default_size([620.0, 380.0])

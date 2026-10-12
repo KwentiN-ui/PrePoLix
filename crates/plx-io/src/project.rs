@@ -405,6 +405,28 @@ mod tests {
     }
 
     #[test]
+    fn analyses_are_saved_and_older_projects_get_the_first() {
+        let mut model = FeModel::default();
+        let mut second = plx_model::AnalysisJob::new("Bracket");
+        second.set_arguments("-i Bracket");
+        model.analyses.push(second);
+        let text = ron::to_string(&model).unwrap();
+        let read: FeModel = ron::from_str(&text).unwrap();
+        assert_eq!(read.analyses, model.analyses);
+        // Projects saved before analyses were part of the model have Analysis-1.
+        let start = text.find("analyses:").unwrap();
+        let end = start + text[start..].find(']').unwrap() + 1;
+        let older = format!("{}{}", &text[..start], &text[end..]).replace(",)", ")");
+        let read: FeModel = ron::from_str(&older).unwrap();
+        assert_eq!(read.analyses.len(), 1);
+        assert_eq!(read.analyses[0].name, plx_model::FIRST_ANALYSIS);
+        // All analyses deleted stays so.
+        model.analyses.clear();
+        let read: FeModel = ron::from_str(&ron::to_string(&model).unwrap()).unwrap();
+        assert!(read.analyses.is_empty());
+    }
+
+    #[test]
     fn hot_spots_of_older_projects_are_skipped() {
         // Hot spots were part of the FE model for a while; they are defined on the results
         // now, and projects saved with them still open.

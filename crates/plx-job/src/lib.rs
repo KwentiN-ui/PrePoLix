@@ -77,6 +77,18 @@ impl Job {
         name: &str,
         input: &str,
     ) -> std::io::Result<Self> {
+        Self::start_with_arguments(solver, work_dir, name, input, &[name.to_owned()])
+    }
+
+    /// Like [`Job::start`], with the command line arguments of CalculiX given; CalculiX takes
+    /// the job name, so that they usually end with `name`.
+    pub fn start_with_arguments(
+        solver: &Solver,
+        work_dir: &Path,
+        name: &str,
+        input: &str,
+        arguments: &[String],
+    ) -> std::io::Result<Self> {
         std::fs::create_dir_all(work_dir)?;
         for extension in OLD_FILES {
             let path = work_dir.join(format!("{name}.{extension}"));
@@ -86,7 +98,7 @@ impl Job {
         }
         std::fs::write(work_dir.join(format!("{name}.inp")), input)?;
         let mut child = Command::new(&solver.executable)
-            .arg(name)
+            .args(arguments)
             .current_dir(work_dir)
             .env("OMP_NUM_THREADS", solver.threads.max(1).to_string())
             .stdin(Stdio::null())

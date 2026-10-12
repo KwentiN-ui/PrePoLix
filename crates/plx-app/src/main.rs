@@ -2,6 +2,7 @@
 
 mod amplitude_dialog;
 mod analysis;
+mod analysis_dialog;
 mod animation;
 mod animation_export;
 mod app;

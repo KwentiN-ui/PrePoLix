@@ -70,6 +70,8 @@ pub enum NewItem {
     Feature(crate::features::FeatureKind),
     /// A node set, element set or surface of the mesh, defined by a selection.
     MeshSet(SetKind),
+    /// An analysis, a job CalculiX runs, edited in its own dialog.
+    Analysis,
 }
 
 /// How a region is given.
@@ -1505,7 +1507,8 @@ impl Editor {
             | NewItem::ResultHotSpot
             | NewItem::MeshSetupItem
             | NewItem::Feature(_)
-            | NewItem::MeshSet(_) => {
+            | NewItem::MeshSet(_)
+            | NewItem::Analysis => {
                 return None;
             }
         };
